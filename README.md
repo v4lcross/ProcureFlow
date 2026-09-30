@@ -1,8 +1,5 @@
 # ProcureFlow — Sistem Aliran Kelulusan Purchase Requisition (PR) v2.0
 
-🌐 **Cuba Aplikasi Secara Langsung (*Live Demo Web*):**  
-👉 **[https://ai.studio/apps/0a29a672-e2a1-406b-86ed-126e2a2704f3](https://ai.studio/apps/0a29a672-e2a1-406b-86ed-126e2a2704f3)**
-
 **ProcureFlow** ialah aplikasi web pengurusan dan penghalaan kelulusan **Purchase Requisition (PR)** mengikut aliran kerja Malaysia (**Waktu Malaysia — `MYT UTC+8`**). Sistem ini dibina untuk mempercepatkan proses semakan dan tandatangan borang PR yang telah diluluskan awal di Coda supaya tidak lagi tertangguh secara manual.
 
 Setiap PR baharu bermula di **Level 0 (Giliran Buyer)** dan bergerak secara berurutan melalui **3 tahap kelulusan (`Level 1 → Level 2 → Level 3`)**, lengkap dengan panel semakan sisi (**Side Viewing Drawer**), fungsi peringatan terus kepada pelulus (**Remind Approver**), penjejak masa **SLA 24 Jam**, halaman **Admin Roles** untuk menetapkan tahap kelulusan berdasarkan e-mel Google/Gmail pengguna, serta penyegerakan masa nyata menggunakan **Firebase Authentication & Cloud Firestore (`asia-southeast1`)**.
