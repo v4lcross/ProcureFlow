@@ -1,0 +1,338 @@
+{
+  "entities": {
+    "Requisition": {
+      "title": "Requisition",
+      "description": "A Purchase Requisition (PR) record routed through Level 0 Buyer Queue and Level 1-3 sequential approvals.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique PR identifier (e.g. PR-2026-089)",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the authenticated workspace owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Requisition title",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "vendorName": {
+          "type": "string",
+          "description": "Approved vendor name",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "department": {
+          "type": "string",
+          "description": "Department or unit name",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "departmentUnitHeader": {
+          "type": "string",
+          "description": "Short department unit header",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "requestor": {
+          "type": "string",
+          "description": "Requestor name and unit",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "costMYR": {
+          "type": "number",
+          "description": "Total requisition cost in MYR"
+        },
+        "status": {
+          "type": "string",
+          "description": "Current workflow routing stage",
+          "enum": [
+            "LEVEL_0_FRESH",
+            "PENDING_L1",
+            "PENDING_L2",
+            "PENDING_L3",
+            "RETURNED_TO_BUYER",
+            "FULLY_APPROVED",
+            "REJECTED"
+          ]
+        },
+        "lastUpdatedMYT": {
+          "type": "string",
+          "description": "Formatted Malaysian timestamp DD/MM/YYYY, HH:mm:ss MYT",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "slaHoursElapsed": {
+          "type": "number",
+          "description": "Elapsed hours against the 24-hour SLA target"
+        },
+        "glAccountCode": {
+          "type": "string",
+          "description": "General Ledger account code",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "costCenter": {
+          "type": "string",
+          "description": "Budget Ref. No. / Cost Center code",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "codaRef": {
+          "type": "string",
+          "description": "Coda pre-approval reference ID",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "businessJustification": {
+          "type": "string",
+          "description": "Business justification and scope of work",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "returnRemarks": {
+          "type": "string",
+          "description": "Mandatory return remarks when returned to Buyer",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "returnedBy": {
+          "type": "string",
+          "description": "Approver who returned the PR",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "rejectionRemarks": {
+          "type": "string",
+          "description": "Mandatory rejection remarks when terminated",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "rejectedBy": {
+          "type": "string",
+          "description": "Approver who rejected the PR",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "quotationFileName": {
+          "type": "string",
+          "description": "Primary vendor quotation PDF filename",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "quotationFileSize": {
+          "type": "string",
+          "description": "File size label",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "quotationBadgeText": {
+          "type": "string",
+          "description": "Verification status label for the quotation",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "quotationValidityDate": {
+          "type": "string",
+          "description": "Quotation validity date",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "quotationRef": {
+          "type": "string",
+          "description": "Vendor quotation reference number",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "quotationIsRevised": {
+          "type": "boolean",
+          "description": "Whether a revised v2 quotation was uploaded"
+        },
+        "amendmentPrevRemarks": {
+          "type": "string",
+          "description": "Previous return remarks before Buyer rectification",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "amendmentReturnedBy": {
+          "type": "string",
+          "description": "Approver who previously returned the PR",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "amendmentBuyerNote": {
+          "type": "string",
+          "description": "Buyer amendment note upon resubmission",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "amendmentResubmittedAt": {
+          "type": "string",
+          "description": "Malaysian timestamp when resubmitted",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "amendmentUpdatedFile": {
+          "type": "string",
+          "description": "Updated quotation filename attached during rectification",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "title",
+        "vendorName",
+        "department",
+        "departmentUnitHeader",
+        "requestor",
+        "costMYR",
+        "status",
+        "lastUpdatedMYT",
+        "slaHoursElapsed",
+        "glAccountCode",
+        "costCenter",
+        "codaRef",
+        "businessJustification",
+        "quotationFileName",
+        "quotationFileSize",
+        "quotationBadgeText",
+        "quotationValidityDate",
+        "quotationRef",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Immutable Malaysian-timestamped (MYT UTC+8) audit trail entry belonging to a specific Purchase Requisition.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique audit log entry ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "prId": {
+          "type": "string",
+          "description": "Parent PR ID",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Formatted Malaysian timestamp DD/MM/YYYY, HH:mm:ss MYT",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "actorName": {
+          "type": "string",
+          "description": "Name of actor who executed the action",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "actorRole": {
+          "type": "string",
+          "description": "Role title of the actor",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "actionTitle": {
+          "type": "string",
+          "description": "Title of the workflow action",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "remarks": {
+          "type": "string",
+          "description": "Detailed remarks or justification",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "targetRecipient": {
+          "type": "string",
+          "description": "Target recipient when a stage-aware reminder is dispatched",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "eventType": {
+          "type": "string",
+          "description": "Category of audit event",
+          "enum": [
+            "IMPORT",
+            "SUBMIT_L1",
+            "APPROVE_L1",
+            "APPROVE_L2",
+            "APPROVE_L3",
+            "RETURN_TO_BUYER",
+            "REJECT",
+            "REMINDER",
+            "DOC_UPLOAD"
+          ]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server creation timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "prId",
+        "ownerId",
+        "timestamp",
+        "actorName",
+        "actorRole",
+        "actionTitle",
+        "remarks",
+        "eventType",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/requisitions/{prId}": {
+      "schema": {
+        "$ref": "#/entities/Requisition"
+      },
+      "description": "Stores Purchase Requisition documents scoped to the authenticated user."
+    },
+    "/requisitions/{prId}/auditLogs/{logId}": {
+      "schema": {
+        "$ref": "#/entities/AuditLog"
+      },
+      "description": "Stores chronological immutable audit trail entries for a specific Purchase Requisition."
+    }
+  }
+}

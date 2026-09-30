@@ -1,0 +1,268 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    // 3. Entity Validation Blueprints (Anti-Update-Gap)
+    function isValidRequisition(data) {
+      return data.keys().hasAll([
+        'id',
+        'ownerId',
+        'title',
+        'vendorName',
+        'department',
+        'departmentUnitHeader',
+        'requestor',
+        'costMYR',
+        'status',
+        'lastUpdatedMYT',
+        'slaHoursElapsed',
+        'glAccountCode',
+        'costCenter',
+        'codaRef',
+        'businessJustification',
+        'quotationFileName',
+        'quotationFileSize',
+        'quotationBadgeText',
+        'quotationValidityDate',
+        'quotationRef',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'ownerId',
+        'title',
+        'vendorName',
+        'department',
+        'departmentUnitHeader',
+        'requestor',
+        'costMYR',
+        'status',
+        'lastUpdatedMYT',
+        'slaHoursElapsed',
+        'glAccountCode',
+        'costCenter',
+        'codaRef',
+        'businessJustification',
+        'returnRemarks',
+        'returnedBy',
+        'rejectionRemarks',
+        'rejectedBy',
+        'quotationFileName',
+        'quotationFileSize',
+        'quotationBadgeText',
+        'quotationValidityDate',
+        'quotationRef',
+        'quotationIsRevised',
+        'amendmentPrevRemarks',
+        'amendmentReturnedBy',
+        'amendmentBuyerNote',
+        'amendmentResubmittedAt',
+        'amendmentUpdatedFile',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.id is string && data.id.size() >= 1 && data.id.size() <= 64 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.title is string && data.title.size() >= 1 && data.title.size() <= 300 &&
+      data.vendorName is string && data.vendorName.size() >= 1 && data.vendorName.size() <= 300 &&
+      data.department is string && data.department.size() >= 1 && data.department.size() <= 200 &&
+      data.departmentUnitHeader is string && data.departmentUnitHeader.size() >= 1 && data.departmentUnitHeader.size() <= 200 &&
+      data.requestor is string && data.requestor.size() >= 1 && data.requestor.size() <= 200 &&
+      data.costMYR is number && data.costMYR >= 0 &&
+      data.status is string && data.status.size() >= 1 && data.status.size() <= 40 &&
+      data.status in [
+        'LEVEL_0_FRESH',
+        'PENDING_L1',
+        'PENDING_L2',
+        'PENDING_L3',
+        'RETURNED_TO_BUYER',
+        'FULLY_APPROVED',
+        'REJECTED'
+      ] &&
+      data.lastUpdatedMYT is string && data.lastUpdatedMYT.size() >= 1 && data.lastUpdatedMYT.size() <= 64 &&
+      data.slaHoursElapsed is number && data.slaHoursElapsed >= 0 &&
+      data.glAccountCode is string && data.glAccountCode.size() >= 1 && data.glAccountCode.size() <= 100 &&
+      data.costCenter is string && data.costCenter.size() >= 1 && data.costCenter.size() <= 100 &&
+      data.codaRef is string && data.codaRef.size() >= 1 && data.codaRef.size() <= 100 &&
+      data.businessJustification is string && data.businessJustification.size() >= 1 && data.businessJustification.size() <= 2000 &&
+      data.quotationFileName is string && data.quotationFileName.size() >= 1 && data.quotationFileName.size() <= 300 &&
+      data.quotationFileSize is string && data.quotationFileSize.size() >= 1 && data.quotationFileSize.size() <= 64 &&
+      data.quotationBadgeText is string && data.quotationBadgeText.size() >= 1 && data.quotationBadgeText.size() <= 100 &&
+      data.quotationValidityDate is string && data.quotationValidityDate.size() >= 1 && data.quotationValidityDate.size() <= 100 &&
+      data.quotationRef is string && data.quotationRef.size() >= 1 && data.quotationRef.size() <= 100 &&
+      (!('returnRemarks' in data) || (data.returnRemarks is string && data.returnRemarks.size() >= 1 && data.returnRemarks.size() <= 1000)) &&
+      (!('returnedBy' in data) || (data.returnedBy is string && data.returnedBy.size() >= 1 && data.returnedBy.size() <= 200)) &&
+      (!('rejectionRemarks' in data) || (data.rejectionRemarks is string && data.rejectionRemarks.size() >= 1 && data.rejectionRemarks.size() <= 1000)) &&
+      (!('rejectedBy' in data) || (data.rejectedBy is string && data.rejectedBy.size() >= 1 && data.rejectedBy.size() <= 200)) &&
+      (!('quotationIsRevised' in data) || data.quotationIsRevised is bool) &&
+      (!('amendmentPrevRemarks' in data) || (data.amendmentPrevRemarks is string && data.amendmentPrevRemarks.size() >= 1 && data.amendmentPrevRemarks.size() <= 1000)) &&
+      (!('amendmentReturnedBy' in data) || (data.amendmentReturnedBy is string && data.amendmentReturnedBy.size() >= 1 && data.amendmentReturnedBy.size() <= 200)) &&
+      (!('amendmentBuyerNote' in data) || (data.amendmentBuyerNote is string && data.amendmentBuyerNote.size() >= 1 && data.amendmentBuyerNote.size() <= 1000)) &&
+      (!('amendmentResubmittedAt' in data) || (data.amendmentResubmittedAt is string && data.amendmentResubmittedAt.size() >= 1 && data.amendmentResubmittedAt.size() <= 64)) &&
+      (!('amendmentUpdatedFile' in data) || (data.amendmentUpdatedFile is string && data.amendmentUpdatedFile.size() >= 1 && data.amendmentUpdatedFile.size() <= 300)) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll([
+        'id',
+        'prId',
+        'ownerId',
+        'timestamp',
+        'actorName',
+        'actorRole',
+        'actionTitle',
+        'remarks',
+        'eventType',
+        'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'prId',
+        'ownerId',
+        'timestamp',
+        'actorName',
+        'actorRole',
+        'actionTitle',
+        'remarks',
+        'targetRecipient',
+        'eventType',
+        'createdAt'
+      ]) &&
+      data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.prId is string && data.prId.size() >= 1 && data.prId.size() <= 64 && data.prId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.timestamp is string && data.timestamp.size() >= 1 && data.timestamp.size() <= 64 &&
+      data.actorName is string && data.actorName.size() >= 1 && data.actorName.size() <= 200 &&
+      data.actorRole is string && data.actorRole.size() >= 1 && data.actorRole.size() <= 200 &&
+      data.actionTitle is string && data.actionTitle.size() >= 1 && data.actionTitle.size() <= 300 &&
+      data.remarks is string && data.remarks.size() >= 1 && data.remarks.size() <= 2000 &&
+      (!('targetRecipient' in data) || (data.targetRecipient is string && data.targetRecipient.size() >= 1 && data.targetRecipient.size() <= 300)) &&
+      data.eventType is string && data.eventType.size() >= 1 && data.eventType.size() <= 40 &&
+      data.eventType in [
+        'IMPORT',
+        'SUBMIT_L1',
+        'APPROVE_L1',
+        'APPROVE_L2',
+        'APPROVE_L3',
+        'RETURN_TO_BUYER',
+        'REJECT',
+        'REMINDER',
+        'DOC_UPLOAD'
+      ] &&
+      data.createdAt is timestamp;
+    }
+
+    // 4. Collection: /requisitions/{prId}
+    match /requisitions/{prId} {
+      allow get: if isSignedIn() && isValidId(prId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      allow create: if isSignedIn() &&
+        isValidId(prId) &&
+        isValidRequisition(incoming()) &&
+        incoming().id == prId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if (
+        isSignedIn() &&
+        isValidId(prId) &&
+        isValidRequisition(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        existing().status != 'FULLY_APPROVED' &&
+        existing().status != 'REJECTED' && (
+          // Action 1: Workflow Stage Progression, Resubmission, Return, or Rejection
+          (incoming().diff(existing()).affectedKeys().hasOnly([
+            'status',
+            'lastUpdatedMYT',
+            'slaHoursElapsed',
+            'returnRemarks',
+            'returnedBy',
+            'rejectionRemarks',
+            'rejectedBy',
+            'amendmentPrevRemarks',
+            'amendmentReturnedBy',
+            'amendmentBuyerNote',
+            'amendmentResubmittedAt',
+            'amendmentUpdatedFile',
+            'updatedAt'
+          ])) ||
+          // Action 2: Revised Quotation Upload & Rectification
+          (incoming().diff(existing()).affectedKeys().hasOnly([
+            'lastUpdatedMYT',
+            'quotationFileName',
+            'quotationFileSize',
+            'quotationBadgeText',
+            'quotationValidityDate',
+            'quotationIsRevised',
+            'updatedAt'
+          ]))
+        )
+      );
+
+      allow delete: if isSignedIn() && isValidId(prId) && existing().ownerId == request.auth.uid;
+
+      // 5. Subcollection: /requisitions/{prId}/auditLogs/{logId} (Master Gate Pattern)
+      match /auditLogs/{logId} {
+        allow get: if isSignedIn() &&
+          isValidId(prId) &&
+          isValidId(logId) &&
+          existing().ownerId == request.auth.uid &&
+          exists(/databases/$(database)/documents/requisitions/$(prId)) &&
+          get(/databases/$(database)/documents/requisitions/$(prId)).data.ownerId == request.auth.uid;
+
+        allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+        allow create: if isSignedIn() &&
+          isValidId(prId) &&
+          isValidId(logId) &&
+          isValidAuditLog(incoming()) &&
+          incoming().id == logId &&
+          incoming().prId == prId &&
+          incoming().createdAt == request.time &&
+          exists(/databases/$(database)/documents/requisitions/$(prId)) &&
+          get(/databases/$(database)/documents/requisitions/$(prId)).data.ownerId == request.auth.uid;
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() &&
+          isValidId(prId) &&
+          isValidId(logId) &&
+          existing().ownerId == request.auth.uid &&
+          exists(/databases/$(database)/documents/requisitions/$(prId)) &&
+          get(/databases/$(database)/documents/requisitions/$(prId)).data.ownerId == request.auth.uid;
+      }
+    }
+  }
+}

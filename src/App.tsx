@@ -24,7 +24,31 @@ import {
   CheckSquare,
   Send,
   Award,
+  Cloud,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
+import {
+  auth,
+  db,
+  googleProvider,
+  signInWithPopup,
+  signOut,
+  onAuthStateChanged,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  OperationType,
+  handleFirestoreError,
+  saveNewPRToFirestore,
+  updatePRWorkflowInFirestore,
+  updatePRQuotationInFirestore,
+  mapFirestoreDocToPR,
+  seedInitialPRsToFirestore,
+  deleteAllUserPRsInFirestore,
+  User,
+} from './firebase';
 import {
   AuditLogEntry,
   DocumentAttachment,
@@ -152,6 +176,11 @@ export default function App() {
     attachment: DocumentAttachment;
   } | null>(null);
 
+  // Firebase Auth & Cloud Sync state
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+
   // Sync PRs to LocalStorage
   useEffect(() => {
     try {
@@ -160,6 +189,126 @@ export default function App() {
       console.error('Failed to save PRs to LocalStorage:', e);
     }
   }, [prs]);
+
+  // Listen to Firebase Auth state
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Attach Firestore real-time listeners when authenticated
+  useEffect(() => {
+    if (!isAuthReady || !firebaseUser) return;
+
+    const reqPath = 'requisitions';
+    const reqQuery = query(
+      collection(db, 'requisitions'),
+      where('ownerId', '==', firebaseUser.uid)
+    );
+
+    let seededOnce = false;
+    const auditUnsubscribes = new Map<string, () => void>();
+    const auditLogsByPr = new Map<string, AuditLogEntry[]>();
+    const docsByPr = new Map<string, Record<string, any>>();
+
+    const rebuildPrState = () => {
+      if (docsByPr.size === 0) return;
+      setPrs((prev) => {
+        const prevMap = new Map<string, PurchaseRequisition>(prev.map((p) => [p.id, p]));
+        const nextList: PurchaseRequisition[] = [];
+        docsByPr.forEach((docData, prId) => {
+          const logs = auditLogsByPr.get(prId) || [];
+          const sortedLogs = [...logs].sort((a, b) => a.id.localeCompare(b.id));
+          const fallback =
+            prevMap.get(prId) || INITIAL_PRS.find((item) => item.id === prId);
+          nextList.push(mapFirestoreDocToPR(docData, sortedLogs, fallback));
+        });
+        return nextList.sort((a, b) => b.id.localeCompare(a.id));
+      });
+    };
+
+    const unsubscribeReqs = onSnapshot(
+      reqQuery,
+      async (snapshot) => {
+        if (snapshot.empty && !seededOnce) {
+          seededOnce = true;
+          setIsCloudSyncing(true);
+          try {
+            await seedInitialPRsToFirestore(prs, firebaseUser);
+          } finally {
+            setIsCloudSyncing(false);
+          }
+          return;
+        }
+
+        const currentIds = new Set<string>();
+        snapshot.docs.forEach((docSnap) => {
+          const prId = docSnap.id;
+          currentIds.add(prId);
+          docsByPr.set(prId, docSnap.data());
+
+          if (!auditUnsubscribes.has(prId)) {
+            const logsPath = `requisitions/${prId}/auditLogs`;
+            const logsQuery = query(
+              collection(db, 'requisitions', prId, 'auditLogs'),
+              where('ownerId', '==', firebaseUser.uid)
+            );
+            const unsubLogs = onSnapshot(
+              logsQuery,
+              (logsSnap) => {
+                const entries: AuditLogEntry[] = logsSnap.docs.map((lDoc) => {
+                  const d = lDoc.data();
+                  return {
+                    id: String(d.id),
+                    timestamp: String(d.timestamp),
+                    actorName: String(d.actorName),
+                    actorRole: String(d.actorRole),
+                    actionTitle: String(d.actionTitle),
+                    remarks: String(d.remarks),
+                    targetRecipient: d.targetRecipient ? String(d.targetRecipient) : undefined,
+                    eventType: d.eventType,
+                  };
+                });
+                auditLogsByPr.set(prId, entries);
+                rebuildPrState();
+              },
+              (error) => {
+                handleFirestoreError(error, OperationType.LIST, logsPath);
+              }
+            );
+            auditUnsubscribes.set(prId, unsubLogs);
+          }
+        });
+
+        // Clean up removed docs
+        Array.from(docsByPr.keys()).forEach((id) => {
+          if (!currentIds.has(id)) {
+            docsByPr.delete(id);
+            auditLogsByPr.delete(id);
+            const unsub = auditUnsubscribes.get(id);
+            if (unsub) {
+              unsub();
+              auditUnsubscribes.delete(id);
+            }
+          }
+        });
+
+        rebuildPrState();
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, reqPath);
+      }
+    );
+
+    return () => {
+      unsubscribeReqs();
+      auditUnsubscribes.forEach((unsub) => unsub());
+      auditUnsubscribes.clear();
+    };
+  }, [isAuthReady, firebaseUser]);
 
   // Sync Role to LocalStorage
   useEffect(() => {
@@ -191,6 +340,34 @@ export default function App() {
     const id = String(Date.now());
     setToast({ id, title, subtitle });
   }, []);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      setIsCloudSyncing(true);
+      const result = await signInWithPopup(auth, googleProvider);
+      triggerToast(
+        'Connected to Firebase Cloud',
+        `Signed in as ${result.user.email || result.user.displayName} • Real-time Firestore sync active.`
+      );
+    } catch (error) {
+      console.error('Google Sign-In error:', error);
+      triggerToast(
+        'Sign-In Cancelled or Failed',
+        error instanceof Error ? error.message : 'Unable to complete Google Sign-In.'
+      );
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleGoogleSignOut = async () => {
+    try {
+      await signOut(auth);
+      triggerToast('Signed Out of Firebase', 'Switched back to local browser persistence.');
+    } catch (error) {
+      console.error('Sign-Out error:', error);
+    }
+  };
 
   const activeRole = ROLES[activeRoleId];
 
@@ -372,7 +549,7 @@ export default function App() {
             eventType: 'SUBMIT_L1',
           };
 
-          return {
+          const updatedPr: PurchaseRequisition = {
             ...pr,
             status: 'PENDING_L1',
             lastUpdatedMYT: nowMYT,
@@ -392,6 +569,12 @@ export default function App() {
             returnedBy: undefined,
             auditTrail: [...pr.auditTrail, newAudit],
           };
+
+          if (firebaseUser) {
+            void updatePRWorkflowInFirestore(updatedPr, newAudit, firebaseUser);
+          }
+
+          return updatedPr;
         })
       );
 
@@ -400,7 +583,7 @@ export default function App() {
         'Assigned to Initial Reviewer / Doc Checker with MYT audit log.'
       );
     },
-    [triggerToast]
+    [triggerToast, firebaseUser]
   );
 
   // Action 2: Approver (L1, L2, L3) clicks Approve (supports Delegation & Cost Threshold Fast-Track)
@@ -433,12 +616,16 @@ export default function App() {
               `${pr.id} Approved at Level 1`,
               `Verified by ${effL1.name}. Advanced to Pending Level 2 Review.`
             );
-            return {
+            const updatedL1: PurchaseRequisition = {
               ...pr,
               status: 'PENDING_L2',
               lastUpdatedMYT: nowMYT,
               auditTrail: [...pr.auditTrail, newAudit],
             };
+            if (firebaseUser) {
+              void updatePRWorkflowInFirestore(updatedL1, newAudit, firebaseUser);
+            }
+            return updatedL1;
           }
 
           if (pr.status === 'PENDING_L2') {
@@ -459,12 +646,16 @@ export default function App() {
                 `${pr.id} Fully Approved (Fast-Track)!`,
                 `Below RM ${workflowConfig.fastTrackThresholdMYR.toLocaleString()} threshold — finalized at Level 2.`
               );
-              return {
+              const updatedFast: PurchaseRequisition = {
                 ...pr,
                 status: 'FULLY_APPROVED',
                 lastUpdatedMYT: nowMYT,
                 auditTrail: [...pr.auditTrail, newAudit],
               };
+              if (firebaseUser) {
+                void updatePRWorkflowInFirestore(updatedFast, newAudit, firebaseUser);
+              }
+              return updatedFast;
             }
 
             const newAudit: AuditLogEntry = {
@@ -483,12 +674,16 @@ export default function App() {
               `${pr.id} Approved at Level 2`,
               `Verified by ${effL2.name}. Advanced to Pending Level 3 Review (GGM, GCAS).`
             );
-            return {
+            const updatedL2: PurchaseRequisition = {
               ...pr,
               status: 'PENDING_L3',
               lastUpdatedMYT: nowMYT,
               auditTrail: [...pr.auditTrail, newAudit],
             };
+            if (firebaseUser) {
+              void updatePRWorkflowInFirestore(updatedL2, newAudit, firebaseUser);
+            }
+            return updatedL2;
           }
 
           if (pr.status === 'PENDING_L3') {
@@ -509,19 +704,23 @@ export default function App() {
               `${pr.id} Fully Approved!`,
               `Level 3 Final Signoff by ${effL3.name}. Permanent Malaysian timestamp recorded.`
             );
-            return {
+            const updatedL3: PurchaseRequisition = {
               ...pr,
               status: 'FULLY_APPROVED',
               lastUpdatedMYT: nowMYT,
               auditTrail: [...pr.auditTrail, newAudit],
             };
+            if (firebaseUser) {
+              void updatePRWorkflowInFirestore(updatedL3, newAudit, firebaseUser);
+            }
+            return updatedL3;
           }
 
           return pr;
         })
       );
     },
-    [workflowConfig, triggerToast]
+    [workflowConfig, triggerToast, firebaseUser]
   );
 
   // Action 3: Approver returns PR to Buyer (Level 0) with mandatory remarks
@@ -543,7 +742,7 @@ export default function App() {
           remarks: `Mandatory Return Remarks: "${remarks}"`,
           eventType: 'RETURN_TO_BUYER',
         };
-        return {
+        const updatedReturn: PurchaseRequisition = {
           ...pr,
           status: 'RETURNED_TO_BUYER',
           lastUpdatedMYT: nowMYT,
@@ -551,6 +750,10 @@ export default function App() {
           returnedBy: `${eff.name} (${activeRole.shortTag})`,
           auditTrail: [...pr.auditTrail, newAudit],
         };
+        if (firebaseUser) {
+          void updatePRWorkflowInFirestore(updatedReturn, newAudit, firebaseUser);
+        }
+        return updatedReturn;
       })
     );
 
@@ -580,7 +783,7 @@ export default function App() {
           remarks: `Rejection Reason: "${remarks}"`,
           eventType: 'REJECT',
         };
-        return {
+        const updatedReject: PurchaseRequisition = {
           ...pr,
           status: 'REJECTED',
           lastUpdatedMYT: nowMYT,
@@ -588,6 +791,10 @@ export default function App() {
           rejectedBy: `${eff.name} (${activeRole.shortTag})`,
           auditTrail: [...pr.auditTrail, newAudit],
         };
+        if (firebaseUser) {
+          void updatePRWorkflowInFirestore(updatedReject, newAudit, firebaseUser);
+        }
+        return updatedReject;
       })
     );
 
@@ -633,11 +840,15 @@ export default function App() {
       setPrs((prev) =>
         prev.map((item) => {
           if (item.id !== pr.id) return item;
-          return {
+          const updatedRemind: PurchaseRequisition = {
             ...item,
             lastUpdatedMYT: nowMYT,
             auditTrail: [...item.auditTrail, newAudit],
           };
+          if (firebaseUser) {
+            void updatePRWorkflowInFirestore(updatedRemind, newAudit, firebaseUser);
+          }
+          return updatedRemind;
         })
       );
 
@@ -646,7 +857,7 @@ export default function App() {
         `Recipient: ${approverName} • Logged to ${pr.id} audit trail (${nowMYT})`
       );
     },
-    [workflowConfig, triggerToast]
+    [workflowConfig, triggerToast, firebaseUser]
   );
 
   // Feature #3: Upload / Replace Revised Quotation PDF during Rectification
@@ -680,12 +891,18 @@ export default function App() {
           eventType: 'DOC_UPLOAD',
         };
 
-        return {
+        const updatedPr: PurchaseRequisition = {
           ...pr,
           lastUpdatedMYT: nowMYT,
           attachments: updatedAttachments,
           auditTrail: [...pr.auditTrail, newAudit],
         };
+
+        if (firebaseUser) {
+          void updatePRQuotationInFirestore(updatedPr, newAudit, firebaseUser);
+        }
+
+        return updatedPr;
       })
     );
 
@@ -843,6 +1060,9 @@ export default function App() {
     };
 
     setPrs((prev) => [newPr, ...prev]);
+    if (firebaseUser) {
+      void saveNewPRToFirestore(newPr, firebaseUser);
+    }
     setSelectedPrId(newPr.id);
     setFilterTab('ALL');
     triggerToast(
@@ -934,6 +1154,9 @@ export default function App() {
     };
 
     setPrs((prev) => [newPr, ...prev]);
+    if (firebaseUser) {
+      void saveNewPRToFirestore(newPr, firebaseUser);
+    }
     setSelectedPrId(newPr.id);
     setFilterTab('ALL');
     setIsNewPRModalOpen(false);
@@ -946,7 +1169,7 @@ export default function App() {
   };
 
   // Reset Demo Data
-  const handleResetDemo = () => {
+  const handleResetDemo = async () => {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(CONFIG_STORAGE_KEY);
     setPrs(INITIAL_PRS);
@@ -958,6 +1181,15 @@ export default function App() {
     setNeedsMyActionOnly(false);
     setSlaAtRiskOnly(false);
     setSelectedBatchIds([]);
+    if (firebaseUser) {
+      setIsCloudSyncing(true);
+      try {
+        await deleteAllUserPRsInFirestore(firebaseUser);
+        await seedInitialPRsToFirestore(INITIAL_PRS, firebaseUser);
+      } finally {
+        setIsCloudSyncing(false);
+      }
+    }
     triggerToast(
       'Prototype State Reset',
       'Restored default 6 sample PRs across all workflow stages.'
@@ -1167,6 +1399,38 @@ export default function App() {
               <span className="w-2 h-2 rounded-full bg-amber-400" />
             )}
           </button>
+
+          {/* Firebase Cloud Sync / Google Auth Controls */}
+          {firebaseUser ? (
+            <div className="bg-emerald-950/70 border border-emerald-700/60 rounded-lg px-2.5 py-1 flex items-center gap-2 text-xs">
+              <Cloud className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <span className="text-emerald-200 font-medium truncate max-w-[140px]">
+                {firebaseUser.email || firebaseUser.displayName || 'Cloud Synced'}
+              </span>
+              {isCloudSyncing && (
+                <span className="text-[10px] text-emerald-300 animate-pulse">Syncing...</span>
+              )}
+              <button
+                type="button"
+                onClick={handleGoogleSignOut}
+                title="Sign out of Firebase Cloud Sync"
+                className="p-1 rounded hover:bg-emerald-900/80 text-emerald-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              disabled={isCloudSyncing}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-xs font-semibold transition-colors cursor-pointer"
+              title="Sign in with Google to persist PRs & Audit Logs in Firebase Firestore"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>{isCloudSyncing ? 'Connecting...' : 'Cloud Sync (Google)'}</span>
+            </button>
+          )}
 
           {/* Reset Demo Data Button */}
           <button

@@ -1,6 +1,6 @@
 # ProcureFlow — Purchase Requisition (PR) Approval Router v2.0
 
-A Malaysian-workflow Purchase Requisition (PR) Approval Router designed to eliminate delays in manual signing of pre-approved Coda PR forms. **ProcureFlow** routes fresh requisitions starting from **Level 0 (Buyer Queue)** through a sequential **3-tier approval pipeline**, featuring an interactive **Side Viewing Drawer**, stage-aware **Remind Approver** notifications, **24-hour SLA tracking**, and an unalterable **Malaysian-timestamped Audit Trail (`MYT UTC+8`)**.
+A Malaysian-workflow Purchase Requisition (PR) Approval Router designed to eliminate delays in manual signing of pre-approved Coda PR forms. **ProcureFlow** routes fresh requisitions starting from **Level 0 (Buyer Queue)** through a sequential **3-tier approval pipeline**, featuring an interactive **Side Viewing Drawer**, stage-aware **Remind Approver** notifications, **24-hour SLA tracking**, an unalterable **Malaysian-timestamped Audit Trail (`MYT UTC+8`)**, and **Firebase Cloud Sync (Google Auth + Cloud Firestore)** alongside local browser persistence.
 
 ---
 
@@ -10,6 +10,7 @@ A Malaysian-workflow Purchase Requisition (PR) Approval Router designed to elimi
 2. **100% Visibility & Control (Level 0 Queue):** Every fresh Coda PR or manually keyed-in PR starts at `Level 0: Fresh PR` in the Buyer's queue, immediately inspectable and submittable via the slide-in **Side Viewing Drawer**.
 3. **Targeted Accountability:** Buyers can dispatch stage-aware reminders directly to the exact approver currently holding the PR (`Level 1`, `Level 2`, or `Level 3`).
 4. **Immutable Malaysian Audit Trail (`UTC+8`):** Every import, manual creation, submission, approval, return, rejection, document upload, and reminder is recorded chronologically in Malaysian Time (`DD/MM/YYYY, HH:mm:ss MYT`).
+5. **Hybrid Cloud & Local Persistence:** Works out-of-the-box with `localStorage` and upgrades seamlessly to real-time **Firebase Cloud Firestore** persistence when signed in with Google (`Cloud Sync (Google)`).
 
 ---
 
@@ -53,6 +54,23 @@ A Malaysian-workflow Purchase Requisition (PR) Approval Router designed to elimi
 * **Printable / Downloadable Certificate:** Generate an official PR Routing & Signoff Certificate showing digital verification stamps (`L0`, `L1`, `L2`, `L3`) and Malaysian timestamps.
 * **CSV Export:** Download the full PR table and audit trail metrics as a `.csv` report.
 
+### 7. Firebase Authentication & Real-Time Cloud Firestore Sync
+* **Google Sign-In (`Cloud Sync (Google)`):** Authenticate via Google popup in the top navigation bar.
+* **Automatic Cloud Seeding & Real-Time Listeners:** When a user signs in for the first time, initial sample PRs and their audit trails are automatically seeded to Cloud Firestore (`asia-southeast1`). Real-time `onSnapshot` listeners keep `/requisitions/{prId}` and `/requisitions/{prId}/auditLogs/{logId}` synchronized across sessions.
+* **Hardened Zero-Trust Security Rules (`firestore.rules`):**
+  * Enforces verified Google accounts (`request.auth.token.email_verified == true`) and strict per-user `ownerId` isolation.
+  * Validates every field against strict key allowlists (`hasAll` / `hasOnly`), string length bounds, regex ID guards, and server timestamps (`request.time`).
+  * Locks terminal states (`FULLY_APPROVED` and `REJECTED`) against unauthorized post-completion edits and makes audit log entries append-only (`allow update: if false`).
+
+---
+
+## 🗄️ Firestore Data Model (`firebase-blueprint.json`)
+
+| Collection Path | Entity Schema | Description |
+| :--- | :--- | :--- |
+| `/requisitions/{prId}` | `Requisition` | Stores Purchase Requisition metadata, status (`LEVEL_0_FRESH` to `FULLY_APPROVED`), `costCenter` (Budget Ref. No.), quotation metadata, return/rejection remarks, and amendment diffs. |
+| `/requisitions/{prId}/auditLogs/{logId}` | `AuditLog` | Subcollection storing chronological, immutable Malaysian-timestamped (`MYT UTC+8`) audit trail events (`IMPORT`, `SUBMIT_L1`, `APPROVE_L1`, `APPROVE_L2`, `APPROVE_L3`, `RETURN_TO_BUYER`, `REJECT`, `REMINDER`, `DOC_UPLOAD`). |
+
 ---
 
 ## ⌨️ Keyboard Shortcuts
@@ -73,19 +91,27 @@ When inspecting requisitions on the dashboard (outside text inputs):
 ## 🛠️ Tech Stack & Project Structure
 
 * **Frontend Framework:** React 19 + TypeScript + Vite
+* **Backend / Cloud Database:** Firebase Authentication (Google Sign-In) + Cloud Firestore (`asia-southeast1`)
 * **Styling:** Tailwind CSS v4 (`Plus Jakarta Sans` & `JetBrains Mono` tabular numerals)
 * **Icons:** Lucide React
-* **Persistence:** Browser `localStorage` (`procureflow_pr_router_v2_data`, `procureflow_pr_router_v2_role`, `procureflow_pr_router_v2_config`)
+* **Security & Linting:** `@firebase/eslint-plugin-security-rules` + TypeScript type checking
 
 ```text
 ├── index.html
 ├── metadata.json
 ├── package.json
 ├── README.md
+├── firebase-applet-config.json         # Firebase project & Firestore database configuration
+├── firebase-blueprint.json             # Strict entity & collection schema blueprint
+├── firestore.rules                     # Hardened Zero-Trust Firestore security rules
+├── firestore.rules.test.ts             # "Dirty Dozen" adversarial security test scenarios
+├── security_spec.md                    # Security invariants & Red Team audit specification
+├── eslint.config.mjs                   # ESLint configuration for Firestore security rules
 └── src/
     ├── main.tsx
     ├── index.css
-    ├── App.tsx                         # Main dashboard, table, batch bar, filters & state
+    ├── firebase.ts                     # Firebase Auth, Firestore SDK helpers & error handler
+    ├── App.tsx                         # Main dashboard, Cloud Sync listeners, batch bar & state
     ├── types/
     │   └── pr.ts                       # TypeScript interfaces for PRs, Audit Logs, Roles & Rules
     ├── data/
@@ -110,7 +136,13 @@ When inspecting requisitions on the dashboard (outside text inputs):
    npm run dev
    ```
 
-3. **Build for production:**
+3. **Lint Firestore Security Rules & TypeScript:**
+   ```bash
+   npx eslint firestore.rules
+   npm run lint
+   ```
+
+4. **Build for production:**
    ```bash
    npm run build
    ```
