@@ -121,3 +121,12 @@ export interface WorkflowConfig {
     L3: boolean;
   };
 }
+
+export interface UserRoleAssignment {
+  id: string;
+  email: string;
+  displayName: string;
+  roleId: RoleId; // 'L0' | 'L1' | 'L2' | 'L3'
+  updatedAtMYT: string;
+  updatedBy: string;
+}

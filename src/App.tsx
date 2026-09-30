@@ -27,6 +27,9 @@ import {
   Cloud,
   LogIn,
   LogOut,
+  ShieldCheck,
+  AlertCircle,
+  Users,
 } from 'lucide-react';
 import {
   auth,
@@ -47,6 +50,8 @@ import {
   mapFirestoreDocToPR,
   seedInitialPRsToFirestore,
   deleteAllUserPRsInFirestore,
+  saveRoleAssignmentToFirestore,
+  deleteRoleAssignmentFromFirestore,
   User,
 } from './firebase';
 import {
@@ -54,9 +59,11 @@ import {
   DocumentAttachment,
   FilterTab,
   PurchaseRequisition,
+  RoleDefinition,
   RoleId,
   SortDirection,
   SortField,
+  UserRoleAssignment,
   WorkflowConfig,
 } from './types/pr';
 import {
@@ -75,6 +82,7 @@ import {
   StatusBadge,
 } from './components/StatusBadge';
 import { SideViewingDrawer } from './components/SideViewingDrawer';
+import { AdminRolePage } from './components/AdminRolePage';
 import {
   ApprovalCertificateModal,
   CreateManualPRModal,
@@ -89,6 +97,7 @@ import {
 const STORAGE_KEY = 'procureflow_pr_router_v2_data';
 const ROLE_STORAGE_KEY = 'procureflow_pr_router_v2_role';
 const CONFIG_STORAGE_KEY = 'procureflow_pr_router_v2_config';
+const ROLE_ASSIGNMENTS_STORAGE_KEY = 'procureflow_pr_router_v2_role_assignments';
 
 interface ToastNotification {
   id: string;
@@ -180,6 +189,30 @@ export default function App() {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Admin Page & User Email Role Assignments (L0, L1, L2, L3)
+  const [activeView, setActiveView] = useState<'DASHBOARD' | 'ADMIN'>('DASHBOARD');
+  const [roleAssignments, setRoleAssignments] = useState<UserRoleAssignment[]>(() => {
+    try {
+      const saved = localStorage.getItem(ROLE_ASSIGNMENTS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {
+      console.error('Failed to read role assignments from LocalStorage:', e);
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ROLE_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(roleAssignments));
+    } catch (e) {
+      console.error('Failed to save role assignments to LocalStorage:', e);
+    }
+  }, [roleAssignments]);
 
   // Sync PRs to LocalStorage
   useEffect(() => {
@@ -310,6 +343,88 @@ export default function App() {
     };
   }, [isAuthReady, firebaseUser]);
 
+  // Listen to Firestore roleAssignments for Admin & Logged-In User
+  useEffect(() => {
+    if (!isAuthReady || !firebaseUser) return;
+
+    const path = 'roleAssignments';
+    const byOwnerMap = new Map<string, UserRoleAssignment>();
+    const byEmailMap = new Map<string, UserRoleAssignment>();
+
+    const syncCombinedAssignments = () => {
+      const mergedMap = new Map<string, UserRoleAssignment>();
+      byOwnerMap.forEach((v, k) => mergedMap.set(k, v));
+      byEmailMap.forEach((v, k) => mergedMap.set(k, v));
+      if (mergedMap.size > 0) {
+        const list = Array.from(mergedMap.values()).sort((a, b) =>
+          a.roleId.localeCompare(b.roleId)
+        );
+        setRoleAssignments(list);
+      }
+    };
+
+    const ownerQuery = query(
+      collection(db, 'roleAssignments'),
+      where('ownerId', '==', firebaseUser.uid)
+    );
+
+    const unsubOwner = onSnapshot(
+      ownerQuery,
+      (snap) => {
+        byOwnerMap.clear();
+        snap.docs.forEach((dSnap) => {
+          const d = dSnap.data();
+          byOwnerMap.set(dSnap.id, {
+            id: String(d.id || dSnap.id),
+            email: String(d.email || '').toLowerCase(),
+            displayName: String(d.displayName || ''),
+            roleId: (d.roleId as RoleId) || 'L1',
+            updatedAtMYT: String(d.updatedAtMYT || ''),
+            updatedBy: String(d.updatedBy || ''),
+          });
+        });
+        syncCombinedAssignments();
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, path);
+      }
+    );
+
+    let unsubEmail: (() => void) | null = null;
+    if (firebaseUser.email) {
+      const emailQuery = query(
+        collection(db, 'roleAssignments'),
+        where('email', '==', firebaseUser.email.toLowerCase())
+      );
+      unsubEmail = onSnapshot(
+        emailQuery,
+        (snap) => {
+          byEmailMap.clear();
+          snap.docs.forEach((dSnap) => {
+            const d = dSnap.data();
+            byEmailMap.set(dSnap.id, {
+              id: String(d.id || dSnap.id),
+              email: String(d.email || '').toLowerCase(),
+              displayName: String(d.displayName || ''),
+              roleId: (d.roleId as RoleId) || 'L1',
+              updatedAtMYT: String(d.updatedAtMYT || ''),
+              updatedBy: String(d.updatedBy || ''),
+            });
+          });
+          syncCombinedAssignments();
+        },
+        (err) => {
+          handleFirestoreError(err, OperationType.LIST, path);
+        }
+      );
+    }
+
+    return () => {
+      unsubOwner();
+      if (unsubEmail) unsubEmail();
+    };
+  }, [isAuthReady, firebaseUser]);
+
   // Sync Role to LocalStorage
   useEffect(() => {
     try {
@@ -343,18 +458,30 @@ export default function App() {
 
   const handleGoogleSignIn = async () => {
     try {
+      setLoginError(null);
       setIsCloudSyncing(true);
       const result = await signInWithPopup(auth, googleProvider);
-      triggerToast(
-        'Connected to Firebase Cloud',
-        `Signed in as ${result.user.email || result.user.displayName} • Real-time Firestore sync active.`
-      );
+      const userEmail = (result.user.email || '').toLowerCase();
+      const matched = roleAssignments.find((a) => a.email.toLowerCase() === userEmail);
+      if (matched) {
+        setActiveRoleId(matched.roleId);
+        triggerToast(
+          'Signed In Successfully',
+          `Active Perspective set to ${matched.roleId}: ${matched.displayName} (${matched.email})`
+        );
+      } else {
+        setActiveRoleId('L0');
+        const identity = result.user.email || result.user.displayName || 'Buyer';
+        triggerToast(
+          'Signed In Successfully',
+          `Active Perspective set to Buyer: ${identity} (Level 0 - Owner)`
+        );
+      }
     } catch (error) {
       console.error('Google Sign-In error:', error);
-      triggerToast(
-        'Sign-In Cancelled or Failed',
-        error instanceof Error ? error.message : 'Unable to complete Google Sign-In.'
-      );
+      const msg =
+        error instanceof Error ? error.message : 'Unable to complete Google Sign-In.';
+      setLoginError(msg);
     } finally {
       setIsCloudSyncing(false);
     }
@@ -363,21 +490,179 @@ export default function App() {
   const handleGoogleSignOut = async () => {
     try {
       await signOut(auth);
-      triggerToast('Signed Out of Firebase', 'Switched back to local browser persistence.');
+      setLoginError(null);
     } catch (error) {
       console.error('Sign-Out error:', error);
     }
   };
 
-  const activeRole = ROLES[activeRoleId];
+  // Dynamically derive L0, L1, L2, L3 identities from Admin Role Assignments + logged-in Google user
+  const rolesWithDynamicBuyer = useMemo<Record<RoleId, RoleDefinition>>(() => {
+    const nextRoles: Record<RoleId, RoleDefinition> = {
+      L0: { ...ROLES.L0 },
+      L1: { ...ROLES.L1 },
+      L2: { ...ROLES.L2 },
+      L3: { ...ROLES.L3 },
+    };
+
+    const currentEmail = (firebaseUser?.email || '').toLowerCase();
+    const currentEmailPrefix = currentEmail ? currentEmail.split('@')[0] : '';
+    const currentDisplayName =
+      firebaseUser?.displayName || currentEmailPrefix || '';
+    const currentUserAssignedRole = roleAssignments.find(
+      (a) => a.email.toLowerCase() === currentEmail
+    );
+
+    (['L0', 'L1', 'L2', 'L3'] as RoleId[]).forEach((lvl) => {
+      const assignedForLevel = roleAssignments.filter((a) => a.roleId === lvl);
+      const base = ROLES[lvl];
+
+      if (assignedForLevel.length > 0) {
+        // Prioritize logged-in user if they are assigned to this level
+        const selfMatch = assignedForLevel.find(
+          (a) => a.email.toLowerCase() === currentEmail
+        );
+        const primary = selfMatch || assignedForLevel[0];
+        const actorIdentity = `${primary.displayName} (${primary.email})`;
+        const extraCount =
+          assignedForLevel.length > 1 ? ` +${assignedForLevel.length - 1}` : '';
+        const fullActorStr = `${actorIdentity}${extraCount}`;
+
+        const rolePrefix =
+          lvl === 'L0'
+            ? 'Buyer'
+            : lvl === 'L1'
+            ? 'Level 1: Doc Checker'
+            : lvl === 'L2'
+            ? 'Level 2: Head Unit'
+            : 'Level 3: GGM, GCAS';
+
+        nextRoles[lvl] = {
+          ...base,
+          shortTag:
+            lvl === 'L0'
+              ? `BUYER (${primary.displayName})`
+              : `${base.shortTag} (${primary.displayName})`,
+          actorName: fullActorStr,
+          dropdownLabel:
+            lvl === 'L0'
+              ? `Buyer: ${fullActorStr} (Level 0 - Owner)`
+              : `${rolePrefix} — ${fullActorStr}`,
+          bannerTitle: `${rolePrefix}: ${fullActorStr}`,
+          bannerDescription: `Viewing as ${fullActorStr} — ${base.roleTitle}. ${base.bannerDescription}`,
+        };
+      }
+    });
+
+    // If logged-in user is NOT explicitly assigned to L1/L2/L3/L0 in Admin Page, default them to Buyer (L0)
+    if (firebaseUser && !currentUserAssignedRole) {
+      const fullIdentity =
+        firebaseUser.displayName && currentEmail
+          ? `${firebaseUser.displayName} (${currentEmail})`
+          : currentEmail || currentDisplayName;
+
+      if (fullIdentity) {
+        nextRoles.L0 = {
+          ...ROLES.L0,
+          shortTag: `BUYER (${currentEmailPrefix || currentDisplayName})`,
+          actorName: fullIdentity,
+          dropdownLabel: `Buyer: ${fullIdentity} (Level 0 - Owner)`,
+          bannerTitle: `Buyer: ${fullIdentity} (Level 0 - Owner)`,
+          bannerDescription: `Viewing as ${fullIdentity} — Level 0 (Buyer / Owner). Inspect Fresh Level 0 PRs via Side Viewing, submit to Level 1, or send stage-aware reminders to Level 1–3 approvers.`,
+        };
+      }
+    }
+
+    return nextRoles;
+  }, [firebaseUser, roleAssignments]);
+
+  // Automatically sync Active Perspective to the logged-in user's assigned level when their assignment is loaded or updated
+  useEffect(() => {
+    if (!firebaseUser?.email) return;
+    const userEmail = firebaseUser.email.toLowerCase();
+    const matched = roleAssignments.find((a) => a.email.toLowerCase() === userEmail);
+    if (matched && activeRoleId !== matched.roleId) {
+      setActiveRoleId(matched.roleId);
+    }
+  }, [firebaseUser, roleAssignments]);
+
+  const handleSaveRoleAssignment = useCallback(
+    (email: string, displayName: string, roleId: RoleId) => {
+      const normalizedEmail = email.trim().toLowerCase();
+      const nowMYT = formatMYTTimestamp(new Date());
+      const updatedBy =
+        firebaseUser?.email || firebaseUser?.displayName || 'Admin';
+      const deterministicId = `role-${normalizedEmail.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+      const existing = roleAssignments.find(
+        (a) => a.email.toLowerCase() === normalizedEmail || a.id === deterministicId
+      );
+
+      const assignment: UserRoleAssignment = {
+        id: existing ? existing.id : deterministicId,
+        email: normalizedEmail,
+        displayName: displayName.trim(),
+        roleId,
+        updatedAtMYT: nowMYT,
+        updatedBy,
+      };
+
+      setRoleAssignments((prev) => {
+        const filtered = prev.filter(
+          (a) => a.email.toLowerCase() !== normalizedEmail && a.id !== assignment.id
+        );
+        return [...filtered, assignment].sort((a, b) => a.roleId.localeCompare(b.roleId));
+      });
+
+      if (firebaseUser) {
+        void saveRoleAssignmentToFirestore(assignment, firebaseUser, Boolean(existing));
+      }
+
+      if (firebaseUser?.email && firebaseUser.email.toLowerCase() === normalizedEmail) {
+        setActiveRoleId(roleId);
+      }
+
+      triggerToast(
+        `Assigned ${assignment.displayName} to ${roleId}`,
+        `${normalizedEmail} is now mapped to ${ROLES[roleId].roleTitle}.`
+      );
+    },
+    [firebaseUser, roleAssignments, triggerToast]
+  );
+
+  const handleRemoveRoleAssignment = useCallback(
+    (assignmentId: string) => {
+      const target = roleAssignments.find((a) => a.id === assignmentId);
+      setRoleAssignments((prev) => prev.filter((a) => a.id !== assignmentId));
+      if (firebaseUser) {
+        void deleteRoleAssignmentFromFirestore(assignmentId);
+      }
+      if (
+        target &&
+        firebaseUser?.email &&
+        target.email.toLowerCase() === firebaseUser.email.toLowerCase()
+      ) {
+        setActiveRoleId('L0');
+      }
+      triggerToast(
+        'Role Assignment Removed',
+        target
+          ? `Removed ${target.email} from ${target.roleId}.`
+          : 'User email role assignment removed.'
+      );
+    },
+    [firebaseUser, roleAssignments, triggerToast]
+  );
+
+  const activeRole = rolesWithDynamicBuyer[activeRoleId];
 
   const handleRoleSwitch = useCallback(
     (newRoleId: RoleId) => {
       setActiveRoleId(newRoleId);
-      const roleObj = ROLES[newRoleId];
+      const roleObj = rolesWithDynamicBuyer[newRoleId];
       triggerToast('Perspective Switched', `Now operating as ${roleObj.bannerTitle}`);
     },
-    [triggerToast]
+    [triggerToast, rolesWithDynamicBuyer]
   );
 
   // Helper to check if a PR needs action from the given role
@@ -538,7 +823,7 @@ export default function App() {
           const newAudit: AuditLogEntry = {
             id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             timestamp: nowMYT,
-            actorName: ROLES.L0.actorName,
+            actorName: rolesWithDynamicBuyer.L0.actorName || 'Buyer',
             actorRole: 'Buyer (Level 0)',
             actionTitle: isResubmit
               ? 'Rectified & Resubmitted PR to Level 1'
@@ -583,7 +868,7 @@ export default function App() {
         'Assigned to Initial Reviewer / Doc Checker with MYT audit log.'
       );
     },
-    [triggerToast, firebaseUser]
+    [triggerToast, firebaseUser, rolesWithDynamicBuyer]
   );
 
   // Action 2: Approver (L1, L2, L3) clicks Approve (supports Delegation & Cost Threshold Fast-Track)
@@ -599,7 +884,7 @@ export default function App() {
             pr.costMYR < workflowConfig.fastTrackThresholdMYR;
 
           if (pr.status === 'PENDING_L1') {
-            const effL1 = getEffectiveApproverName('L1', workflowConfig);
+            const effL1 = getEffectiveApproverName('L1', workflowConfig, rolesWithDynamicBuyer);
             const newAudit: AuditLogEntry = {
               id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
               timestamp: nowMYT,
@@ -629,7 +914,7 @@ export default function App() {
           }
 
           if (pr.status === 'PENDING_L2') {
-            const effL2 = getEffectiveApproverName('L2', workflowConfig);
+            const effL2 = getEffectiveApproverName('L2', workflowConfig, rolesWithDynamicBuyer);
             if (isFastTracked) {
               const newAudit: AuditLogEntry = {
                 id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -687,7 +972,7 @@ export default function App() {
           }
 
           if (pr.status === 'PENDING_L3') {
-            const effL3 = getEffectiveApproverName('L3', workflowConfig);
+            const effL3 = getEffectiveApproverName('L3', workflowConfig, rolesWithDynamicBuyer);
             const newAudit: AuditLogEntry = {
               id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
               timestamp: nowMYT,
@@ -720,7 +1005,7 @@ export default function App() {
         })
       );
     },
-    [workflowConfig, triggerToast, firebaseUser]
+    [workflowConfig, triggerToast, firebaseUser, rolesWithDynamicBuyer]
   );
 
   // Action 3: Approver returns PR to Buyer (Level 0) with mandatory remarks
@@ -728,7 +1013,7 @@ export default function App() {
     if (!returnModalPr) return;
     const nowMYT = formatMYTTimestamp(new Date());
     const prId = returnModalPr.id;
-    const eff = getEffectiveApproverName(activeRole.id, workflowConfig);
+    const eff = getEffectiveApproverName(activeRole.id, workflowConfig, rolesWithDynamicBuyer);
 
     setPrs((prev) =>
       prev.map((pr) => {
@@ -769,7 +1054,7 @@ export default function App() {
     if (!rejectModalPr) return;
     const nowMYT = formatMYTTimestamp(new Date());
     const prId = rejectModalPr.id;
-    const eff = getEffectiveApproverName(activeRole.id, workflowConfig);
+    const eff = getEffectiveApproverName(activeRole.id, workflowConfig, rolesWithDynamicBuyer);
 
     setPrs((prev) =>
       prev.map((pr) => {
@@ -808,26 +1093,26 @@ export default function App() {
       const nowMYT = formatMYTTimestamp(new Date());
       let levelNum = 1;
       let approverTitle = 'Initial Reviewer / Document Checker';
-      let approverName = getEffectiveApproverName('L1', workflowConfig).name;
+      let approverName = getEffectiveApproverName('L1', workflowConfig, rolesWithDynamicBuyer).name;
 
       if (pr.status === 'PENDING_L1') {
         levelNum = 1;
         approverTitle = 'Initial Reviewer / Document Checker';
-        approverName = getEffectiveApproverName('L1', workflowConfig).name;
+        approverName = getEffectiveApproverName('L1', workflowConfig, rolesWithDynamicBuyer).name;
       } else if (pr.status === 'PENDING_L2') {
         levelNum = 2;
         approverTitle = 'Head Unit Reviewer';
-        approverName = getEffectiveApproverName('L2', workflowConfig).name;
+        approverName = getEffectiveApproverName('L2', workflowConfig, rolesWithDynamicBuyer).name;
       } else if (pr.status === 'PENDING_L3') {
         levelNum = 3;
         approverTitle = 'GGM, GCAS';
-        approverName = getEffectiveApproverName('L3', workflowConfig).name;
+        approverName = getEffectiveApproverName('L3', workflowConfig, rolesWithDynamicBuyer).name;
       }
 
       const newAudit: AuditLogEntry = {
         id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         timestamp: nowMYT,
-        actorName: ROLES.L0.actorName,
+        actorName: rolesWithDynamicBuyer.L0.actorName || 'Buyer',
         actorRole: 'Buyer (Level 0)',
         actionTitle: `Triggered Reminder to Level ${levelNum} Approver`,
         targetRecipient: `${approverTitle} (${approverName})`,
@@ -857,7 +1142,7 @@ export default function App() {
         `Recipient: ${approverName} • Logged to ${pr.id} audit trail (${nowMYT})`
       );
     },
-    [workflowConfig, triggerToast, firebaseUser]
+    [workflowConfig, triggerToast, firebaseUser, rolesWithDynamicBuyer]
   );
 
   // Feature #3: Upload / Replace Revised Quotation PDF during Rectification
@@ -884,7 +1169,7 @@ export default function App() {
         const newAudit: AuditLogEntry = {
           id: `aud-${Date.now()}`,
           timestamp: nowMYT,
-          actorName: ROLES.L0.actorName,
+          actorName: rolesWithDynamicBuyer.L0.actorName || 'Buyer',
           actorRole: 'Buyer (Level 0)',
           actionTitle: 'Uploaded Revised Vendor Quotation PDF',
           remarks: `Replaced quotation with "${fileName}" (${fileSize}, Valid until 31/12/2026). Ready for re-submission to Level 1.`,
@@ -1053,7 +1338,7 @@ export default function App() {
           actorName: 'Coda Sync Webhook',
           actorRole: 'System (Automated)',
           actionTitle: 'Imported Coda Requisition to Level 0 Queue',
-          remarks: `Initialized as Level 0: Fresh PR under Buyer Ahmad (${template.codaRef}).`,
+          remarks: `Initialized as Level 0: Fresh PR under Buyer ${rolesWithDynamicBuyer.L0.actorName ? `${rolesWithDynamicBuyer.L0.actorName} ` : ''}(${template.codaRef}).`,
           eventType: 'IMPORT',
         },
       ],
@@ -1078,7 +1363,7 @@ export default function App() {
       {
         id: `aud-${Date.now()}-1`,
         timestamp: nowMYT,
-        actorName: ROLES.L0.actorName,
+        actorName: rolesWithDynamicBuyer.L0.actorName || 'Buyer',
         actorRole: 'Buyer (Level 0 - Owner)',
         actionTitle: 'Keyed In New Purchase Requisition (Level 0)',
         remarks: `Created manual PR ${data.prNo} for ${data.department} (Budget Ref: ${data.budgetRefNo}, Cost: ${formatCurrencyMYR(
@@ -1092,7 +1377,7 @@ export default function App() {
       initialAudit.push({
         id: `aud-${Date.now()}-2`,
         timestamp: nowMYT,
-        actorName: ROLES.L0.actorName,
+        actorName: rolesWithDynamicBuyer.L0.actorName || 'Buyer',
         actorRole: 'Buyer (Level 0 - Owner)',
         actionTitle: 'Submitted Pre-Approved PR for Routing',
         remarks:
@@ -1324,6 +1609,102 @@ export default function App() {
     workflowConfig.delegationActive.L3 ||
     workflowConfig.enableThresholdFastTrack;
 
+  // 0A. Auth Initializing Screen
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-[#0B1120] text-white flex flex-col items-center justify-center p-6">
+        <div className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center shadow-lg mb-4 animate-pulse">
+          <FileCheck2 className="w-6 h-6 text-white" />
+        </div>
+        <div className="text-sm font-bold tracking-tight">ProcureFlow — PR Approval Router v2.0</div>
+        <div className="text-xs text-slate-400 mt-1 font-mono">
+          Verifying authentication session...
+        </div>
+      </div>
+    );
+  }
+
+  // 0B. Dedicated Login Page before Main Dashboard
+  if (!firebaseUser) {
+    return (
+      <div className="min-h-screen bg-[#0B1120] text-slate-100 flex flex-col justify-between relative overflow-hidden">
+        {/* Top Bar on Login Screen */}
+        <header className="px-6 py-4 border-b border-slate-800/80 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center shadow-sm">
+              <FileCheck2 className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-base tracking-tight text-white">ProcureFlow</span>
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-slate-800 text-blue-400 border border-slate-700">
+                  PR Approval Router v2.0
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">Malaysian Workflow • MYT (UTC+8)</p>
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 flex items-center gap-2 text-xs font-mono">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-semibold text-slate-100">{mytClock} MYT</span>
+            <span className="text-slate-400 text-[11px]">(UTC+8)</span>
+          </div>
+        </header>
+
+        {/* Center Login Card */}
+        <main className="flex-1 flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-white text-slate-900 rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-slate-900 px-6 py-6 text-white border-b border-slate-800">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-500/15 border border-blue-400/30 text-blue-300 text-[11px] font-semibold mb-3">
+                <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                <span>Enterprise Procurement Portal</span>
+              </div>
+              <h1 className="text-xl font-bold tracking-tight text-white">
+                Sign In to ProcureFlow
+              </h1>
+              <p className="text-xs text-slate-300 mt-1.5 leading-relaxed">
+                Authenticate with your Google account to access the Purchase Requisition Approval
+                Router. Your Google identity will automatically configure your{' '}
+                <span className="text-white font-semibold">Level</span> perspective.
+              </p>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {loginError && (
+                <div className="rounded-xl bg-red-50 border border-red-200 p-3 flex items-start gap-2.5 text-xs text-red-700">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <div className="leading-snug">{loginError}</div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isCloudSyncing}
+                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-bold text-xs flex items-center justify-center gap-2.5 shadow-md transition-colors cursor-pointer"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>
+                  {isCloudSyncing ? 'Signing In with Google...' : 'Sign In with Google (Gmail)'}
+                </span>
+              </button>
+
+              <div className="text-[11px] text-slate-400 text-center leading-relaxed">
+                Protected by Firebase Authentication & Cloud Firestore (`asia-southeast1`) with
+                immutable Malaysian (`MYT UTC+8`) audit trail logging.
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <footer className="px-6 py-3 border-t border-slate-800/80 text-center text-[11px] text-slate-500">
+          ProcureFlow — Purchase Requisition Approval Router v2.0 • Malaysian Workflow (UTC+8)
+        </footer>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-slate-900">
       {/* 1. TOP DARK HEADER BAR */}
@@ -1368,19 +1749,36 @@ export default function App() {
               className="bg-[#0F172A] text-white font-semibold text-xs rounded-md px-2.5 py-1 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
               <option value="L0">
-                Buyer: Ahmad (Level 0 - Owner) [{roleInboxCounts.L0} Actionable]
+                {rolesWithDynamicBuyer.L0.dropdownLabel} [{roleInboxCounts.L0} Actionable]
               </option>
               <option value="L1">
-                Level 1: Doc Checker (Sarah) [{roleInboxCounts.L1} Pending]
+                {rolesWithDynamicBuyer.L1.dropdownLabel} [{roleInboxCounts.L1} Pending]
               </option>
               <option value="L2">
-                Level 2: Head Unit (En. Razak) [{roleInboxCounts.L2} Pending]
+                {rolesWithDynamicBuyer.L2.dropdownLabel} [{roleInboxCounts.L2} Pending]
               </option>
               <option value="L3">
-                Level 3: GGM, GCAS (Datuk Farid) [{roleInboxCounts.L3} Pending]
+                {rolesWithDynamicBuyer.L3.dropdownLabel} [{roleInboxCounts.L3} Pending]
               </option>
             </select>
           </div>
+
+          {/* Admin Role Assignment Page Button */}
+          <button
+            type="button"
+            onClick={() =>
+              setActiveView((prev) => (prev === 'ADMIN' ? 'DASHBOARD' : 'ADMIN'))
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors cursor-pointer ${
+              activeView === 'ADMIN'
+                ? 'bg-blue-600 border-blue-500 text-white shadow-xs'
+                : 'bg-slate-900/90 hover:bg-slate-800 border-slate-800 text-blue-300'
+            }`}
+            title="Admin Page: Assign user emails to Level 1, Level 2, or Level 3"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Admin Roles ({roleAssignments.length})</span>
+          </button>
 
           {/* Feature #5: Workflow Rules & Delegation Button */}
           <button
@@ -1400,37 +1798,29 @@ export default function App() {
             )}
           </button>
 
-          {/* Firebase Cloud Sync / Google Auth Controls */}
-          {firebaseUser ? (
-            <div className="bg-emerald-950/70 border border-emerald-700/60 rounded-lg px-2.5 py-1 flex items-center gap-2 text-xs">
-              <Cloud className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="text-emerald-200 font-medium truncate max-w-[140px]">
-                {firebaseUser.email || firebaseUser.displayName || 'Cloud Synced'}
-              </span>
-              {isCloudSyncing && (
-                <span className="text-[10px] text-emerald-300 animate-pulse">Syncing...</span>
-              )}
-              <button
-                type="button"
-                onClick={handleGoogleSignOut}
-                title="Sign out of Firebase Cloud Sync"
-                className="p-1 rounded hover:bg-emerald-900/80 text-emerald-300 hover:text-white transition-colors cursor-pointer"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={handleGoogleSignIn}
-              disabled={isCloudSyncing}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 text-xs font-semibold transition-colors cursor-pointer"
-              title="Sign in with Google to persist PRs & Audit Logs in Firebase Firestore"
+          {/* Signed-In User Status & Sign Out Button */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-lg px-2.5 py-1 flex items-center gap-2 text-xs">
+            <Cloud className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <span
+              className="text-slate-200 font-medium truncate max-w-[150px]"
+              title={firebaseUser.email || firebaseUser.displayName || 'Signed In'}
             >
-              <LogIn className="w-3.5 h-3.5" />
-              <span>{isCloudSyncing ? 'Connecting...' : 'Cloud Sync (Google)'}</span>
-            </button>
-          )}
+              {firebaseUser.email || firebaseUser.displayName}
+            </span>
+            {isCloudSyncing && (
+              <span className="text-[10px] text-emerald-300 animate-pulse">Syncing...</span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGoogleSignOut}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/25 border border-red-500/40 text-red-300 hover:text-white text-xs font-semibold transition-colors cursor-pointer"
+            title="Sign out of ProcureFlow and return to the Google Login screen"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign Out</span>
+          </button>
 
           {/* Reset Demo Data Button */}
           <button
@@ -1457,7 +1847,7 @@ export default function App() {
           {/* 1-Click Role Switcher Pills with Live Inbox Counts */}
           <div className="hidden xl:flex items-center gap-1 bg-blue-100/70 p-1 rounded-lg border border-blue-200/70">
             {(['L0', 'L1', 'L2', 'L3'] as RoleId[]).map((rid) => {
-              const r = ROLES[rid];
+              const r = rolesWithDynamicBuyer[rid];
               const count = roleInboxCounts[rid];
               const isCurrent = activeRoleId === rid;
               return (
@@ -1508,7 +1898,21 @@ export default function App() {
         </div>
       </div>
 
-      {/* 3. MAIN WORKSPACE SPLIT VIEW (Dashboard Left + Side Viewing Drawer Right) */}
+      {/* 3. MAIN WORKSPACE: ADMIN ROLE PAGE OR SPLIT VIEW DASHBOARD */}
+      {activeView === 'ADMIN' ? (
+        <AdminRolePage
+          assignments={roleAssignments}
+          rolesMap={rolesWithDynamicBuyer}
+          currentUserEmail={firebaseUser.email || ''}
+          currentUserName={
+            firebaseUser.displayName ||
+            (firebaseUser.email ? firebaseUser.email.split('@')[0] : '')
+          }
+          onSaveAssignment={handleSaveRoleAssignment}
+          onRemoveAssignment={handleRemoveRoleAssignment}
+          onBackToDashboard={() => setActiveView('DASHBOARD')}
+        />
+      ) : (
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 relative">
         {/* Left Main Dashboard Area */}
         <main className="flex-1 min-w-0 p-6 space-y-5 relative overflow-x-hidden">
@@ -1552,7 +1956,11 @@ export default function App() {
                 <div className="text-2xl font-bold font-mono text-[#D97706] mt-1">
                   {counts.freshL0}
                 </div>
-                <div className="text-[11px] text-slate-400 mt-1">Owned by Buyer</div>
+                <div className="text-[11px] text-slate-400 mt-1 truncate max-w-[160px]">
+                  {rolesWithDynamicBuyer.L0.actorName
+                    ? `Owned by ${rolesWithDynamicBuyer.L0.actorName}`
+                    : 'Owned by Buyer'}
+                </div>
               </div>
               <div className="w-10 h-10 rounded-lg bg-[#FEF3C7] border border-amber-200/70 text-[#B45309] font-bold text-xs flex items-center justify-center shrink-0">
                 L0
@@ -2063,6 +2471,8 @@ export default function App() {
           <SideViewingDrawer
             pr={selectedPr}
             activeRole={activeRole}
+            rolesMap={rolesWithDynamicBuyer}
+            buyerActorName={rolesWithDynamicBuyer.L0.actorName}
             workflowConfig={workflowConfig}
             onClose={() => setSelectedPrId(null)}
             onSubmitToL1={handleSubmitToL1}
@@ -2080,6 +2490,7 @@ export default function App() {
           />
         )}
       </div>
+      )}
 
       {/* Modals & Dialogs */}
       <ReturnToBuyerModal
@@ -2101,6 +2512,7 @@ export default function App() {
       <SendReminderModal
         pr={remindModalPr}
         isOpen={Boolean(remindModalPr)}
+        rolesMap={rolesWithDynamicBuyer}
         workflowConfig={workflowConfig}
         onClose={() => setRemindModalPr(null)}
         onConfirmRemind={(customMsg) => {
@@ -2119,11 +2531,13 @@ export default function App() {
 
       <ApprovalCertificateModal
         pr={certificatePr}
+        rolesMap={rolesWithDynamicBuyer}
         onClose={() => setCertificatePr(null)}
       />
 
       <WorkflowRulesModal
         isOpen={isRulesModalOpen}
+        rolesMap={rolesWithDynamicBuyer}
         config={workflowConfig}
         onUpdateConfig={(newCfg) => {
           setWorkflowConfig(newCfg);

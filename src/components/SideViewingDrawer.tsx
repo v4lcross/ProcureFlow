@@ -38,6 +38,8 @@ import { SlaTrackerBadge, StatusBadge } from './StatusBadge';
 interface SideViewingDrawerProps {
   pr: PurchaseRequisition | null;
   activeRole: RoleDefinition;
+  rolesMap?: Record<RoleId, RoleDefinition>;
+  buyerActorName?: string;
   workflowConfig: WorkflowConfig;
   onClose: () => void;
   onSubmitToL1: (prId: string, buyerNote?: string) => void;
@@ -55,6 +57,8 @@ interface SideViewingDrawerProps {
 export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
   pr,
   activeRole,
+  rolesMap = ROLES,
+  buyerActorName = '',
   workflowConfig,
   onClose,
   onSubmitToL1,
@@ -106,7 +110,7 @@ export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
 
   const getPendingLevelDetails = () => {
     if (pr.status === 'PENDING_L1') {
-      const eff = getEffectiveApproverName('L1', workflowConfig);
+      const eff = getEffectiveApproverName('L1', workflowConfig, rolesMap);
       return {
         level: 1,
         shortLabel: 'L1',
@@ -116,7 +120,7 @@ export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
       };
     }
     if (pr.status === 'PENDING_L2') {
-      const eff = getEffectiveApproverName('L2', workflowConfig);
+      const eff = getEffectiveApproverName('L2', workflowConfig, rolesMap);
       return {
         level: 2,
         shortLabel: 'L2',
@@ -126,7 +130,7 @@ export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
       };
     }
     if (pr.status === 'PENDING_L3') {
-      const eff = getEffectiveApproverName('L3', workflowConfig);
+      const eff = getEffectiveApproverName('L3', workflowConfig, rolesMap);
       return {
         level: 3,
         shortLabel: 'L3',
@@ -140,16 +144,16 @@ export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
 
   const pendingInfo = getPendingLevelDetails();
 
-  const effL1 = getEffectiveApproverName('L1', workflowConfig);
-  const effL2 = getEffectiveApproverName('L2', workflowConfig);
-  const effL3 = getEffectiveApproverName('L3', workflowConfig);
+  const effL1 = getEffectiveApproverName('L1', workflowConfig, rolesMap);
+  const effL2 = getEffectiveApproverName('L2', workflowConfig, rolesMap);
+  const effL3 = getEffectiveApproverName('L3', workflowConfig, rolesMap);
 
   const pipelineSteps = [
     {
       id: 'L0',
       code: 'L0',
       label: 'Buyer Queue',
-      actor: 'Ahmad',
+      actor: rolesMap.L0.actorName || buyerActorName,
       isDelegated: false,
       isSkipped: false,
       isCompleted:
@@ -164,7 +168,7 @@ export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
       id: 'L1',
       code: 'L1',
       label: 'Doc Checker',
-      actor: effL1.name,
+      actor: effL1.isDelegated ? effL1.name : rolesMap.L1.actorName,
       isDelegated: effL1.isDelegated,
       isSkipped: false,
       isCompleted:
@@ -178,7 +182,7 @@ export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
       id: 'L2',
       code: 'L2',
       label: 'Head Unit',
-      actor: effL2.name,
+      actor: effL2.isDelegated ? effL2.name : rolesMap.L2.actorName,
       isDelegated: effL2.isDelegated,
       isSkipped: false,
       isCompleted: pr.status === 'PENDING_L3' || pr.status === 'FULLY_APPROVED',
@@ -189,7 +193,11 @@ export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
       id: 'L3',
       code: 'L3',
       label: isFastTracked ? 'Fast-Tracked' : 'GGM, GCAS',
-      actor: isFastTracked ? '< RM 25k Rule' : effL3.name,
+      actor: isFastTracked
+        ? '< RM 25k Rule'
+        : effL3.isDelegated
+        ? effL3.name
+        : rolesMap.L3.actorName,
       isDelegated: !isFastTracked && effL3.isDelegated,
       isSkipped: isFastTracked,
       isCompleted: pr.status === 'FULLY_APPROVED' && !isFastTracked,
@@ -942,10 +950,10 @@ export const SideViewingDrawer: React.FC<SideViewingDrawerProps> = ({
                 type="button"
                 onClick={() => onSwitchRole(requiredRoleId)}
                 className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-                title={`Switch active perspective to ${ROLES[requiredRoleId].dropdownLabel}`}
+                title={`Switch active perspective to ${rolesMap[requiredRoleId].dropdownLabel}`}
               >
                 <UserCheck className="w-3.5 h-3.5 text-blue-600" />
-                <span>Act as {ROLES[requiredRoleId].shortTag}</span>
+                <span>Act as {rolesMap[requiredRoleId].shortTag}</span>
               </button>
             )}
           </div>

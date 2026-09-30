@@ -24,6 +24,10 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.email_verified == true;
     }
 
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'rbmuhamad@mediaprima.com.my';
+    }
+
     // 3. Entity Validation Blueprints (Anti-Update-Gap)
     function isValidRequisition(data) {
       return data.keys().hasAll([
@@ -179,6 +183,42 @@ service cloud.firestore {
       data.createdAt is timestamp;
     }
 
+    function isValidRoleAssignment(data) {
+      return data.keys().hasAll([
+        'id',
+        'ownerId',
+        'email',
+        'displayName',
+        'roleId',
+        'updatedAtMYT',
+        'updatedBy',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'ownerId',
+        'email',
+        'displayName',
+        'roleId',
+        'updatedAtMYT',
+        'updatedBy',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+      data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 200 &&
+      data.roleId is string && data.roleId.size() >= 2 && data.roleId.size() <= 10 &&
+      data.roleId in ['L0', 'L1', 'L2', 'L3'] &&
+      data.updatedAtMYT is string && data.updatedAtMYT.size() >= 1 && data.updatedAtMYT.size() <= 64 &&
+      data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 200 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
     // 4. Collection: /requisitions/{prId}
     match /requisitions/{prId} {
       allow get: if isSignedIn() && isValidId(prId) && existing().ownerId == request.auth.uid;
@@ -263,6 +303,52 @@ service cloud.firestore {
           exists(/databases/$(database)/documents/requisitions/$(prId)) &&
           get(/databases/$(database)/documents/requisitions/$(prId)).data.ownerId == request.auth.uid;
       }
+    }
+
+    // 6. Collection: /roleAssignments/{assignmentId}
+    match /roleAssignments/{assignmentId} {
+      allow get: if isSignedIn() && isValidId(assignmentId) && (
+        existing().ownerId == request.auth.uid ||
+        existing().email == request.auth.token.email ||
+        isAdmin()
+      );
+
+      allow list: if isSignedIn() && (
+        existing().ownerId == request.auth.uid ||
+        existing().email == request.auth.token.email ||
+        isAdmin()
+      );
+
+      allow create: if isSignedIn() &&
+        isValidId(assignmentId) &&
+        isValidRoleAssignment(incoming()) &&
+        incoming().id == assignmentId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (incoming().ownerId == request.auth.uid || isAdmin());
+
+      allow update: if (
+        isSignedIn() &&
+        isValidId(assignmentId) &&
+        isValidRoleAssignment(incoming()) &&
+        (existing().ownerId == request.auth.uid || isAdmin()) &&
+        incoming().id == existing().id &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'email',
+          'displayName',
+          'roleId',
+          'updatedAtMYT',
+          'updatedBy',
+          'updatedAt'
+        ])
+      );
+
+      allow delete: if isSignedIn() &&
+        isValidId(assignmentId) &&
+        (existing().ownerId == request.auth.uid || isAdmin());
     }
   }
 }

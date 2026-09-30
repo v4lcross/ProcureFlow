@@ -25,6 +25,7 @@ import {
   DocumentAttachment,
   PurchaseRequisition,
   RoleDefinition,
+  RoleId,
   WorkflowConfig,
 } from '../types/pr';
 import {
@@ -98,7 +99,7 @@ export const ReturnToBuyerModal: React.FC<ReturnModalProps> = ({
             You are returning{' '}
             <span className="font-mono font-semibold text-slate-900">{pr.id}</span> (
             <span className="font-medium text-slate-800">{pr.title}</span>) to{' '}
-            <span className="font-semibold text-slate-900">Buyer Ahmad</span> for rectification as{' '}
+            <span className="font-semibold text-slate-900">Buyer (Level 0)</span> for rectification as{' '}
             <span className="font-semibold text-amber-700">{activeRole.dropdownLabel}</span>. Please
             specify the exact missing or incorrect details:
           </p>
@@ -274,6 +275,7 @@ export const RejectRequisitionModal: React.FC<RejectModalProps> = ({
 interface ReminderModalProps {
   pr: PurchaseRequisition | null;
   isOpen: boolean;
+  rolesMap?: Record<RoleId, RoleDefinition>;
   workflowConfig: WorkflowConfig;
   onClose: () => void;
   onConfirmRemind: (customMessage: string) => void;
@@ -282,6 +284,7 @@ interface ReminderModalProps {
 export const SendReminderModal: React.FC<ReminderModalProps> = ({
   pr,
   isOpen,
+  rolesMap = ROLES,
   workflowConfig,
   onClose,
   onConfirmRemind,
@@ -290,7 +293,7 @@ export const SendReminderModal: React.FC<ReminderModalProps> = ({
 
   const getStageTarget = (status: PurchaseRequisition['status']) => {
     if (status === 'PENDING_L1') {
-      const eff = getEffectiveApproverName('L1', workflowConfig);
+      const eff = getEffectiveApproverName('L1', workflowConfig, rolesMap);
       return {
         level: 1,
         roleTitle: 'Initial Reviewer / Document Checker (Level 1)',
@@ -299,7 +302,7 @@ export const SendReminderModal: React.FC<ReminderModalProps> = ({
       };
     }
     if (status === 'PENDING_L2') {
-      const eff = getEffectiveApproverName('L2', workflowConfig);
+      const eff = getEffectiveApproverName('L2', workflowConfig, rolesMap);
       return {
         level: 2,
         roleTitle: 'Head Unit Reviewer (Level 2)',
@@ -307,7 +310,7 @@ export const SendReminderModal: React.FC<ReminderModalProps> = ({
         isDelegated: eff.isDelegated,
       };
     }
-    const eff = getEffectiveApproverName('L3', workflowConfig);
+    const eff = getEffectiveApproverName('L3', workflowConfig, rolesMap);
     return {
       level: 3,
       roleTitle: 'GGM, GCAS (Level 3)',
@@ -586,11 +589,13 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
 interface ApprovalCertificateModalProps {
   pr: PurchaseRequisition | null;
+  rolesMap?: Record<RoleId, RoleDefinition>;
   onClose: () => void;
 }
 
 export const ApprovalCertificateModal: React.FC<ApprovalCertificateModalProps> = ({
   pr,
+  rolesMap = ROLES,
   onClose,
 }) => {
   if (!pr) return null;
@@ -723,7 +728,7 @@ export const ApprovalCertificateModal: React.FC<ApprovalCertificateModalProps> =
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {(['L0', 'L1', 'L2', 'L3'] as const).map((lvl) => {
-                  const role = ROLES[lvl];
+                  const role = rolesMap[lvl];
                   const matchingLog = [...pr.auditTrail]
                     .reverse()
                     .find((a) =>
@@ -756,7 +761,9 @@ export const ApprovalCertificateModal: React.FC<ApprovalCertificateModalProps> =
                         )}
                       </div>
                       <div className="font-bold text-slate-900 mt-1 truncate">
-                        {matchingLog ? matchingLog.actorName : role.actorName}
+                        {matchingLog
+                          ? matchingLog.actorName
+                          : role.actorName || 'Unassigned'}
                       </div>
                       <div className="text-[10px] text-slate-500 truncate">{role.roleTitle}</div>
                       <div className="text-[9px] font-mono text-slate-500 mt-1.5">
@@ -804,6 +811,7 @@ export const ApprovalCertificateModal: React.FC<ApprovalCertificateModalProps> =
 
 interface WorkflowRulesModalProps {
   isOpen: boolean;
+  rolesMap?: Record<RoleId, RoleDefinition>;
   config: WorkflowConfig;
   onUpdateConfig: (newConfig: WorkflowConfig) => void;
   onClose: () => void;
@@ -811,6 +819,7 @@ interface WorkflowRulesModalProps {
 
 export const WorkflowRulesModal: React.FC<WorkflowRulesModalProps> = ({
   isOpen,
+  rolesMap = ROLES,
   config,
   onUpdateConfig,
   onClose,
@@ -864,7 +873,7 @@ export const WorkflowRulesModal: React.FC<WorkflowRulesModalProps> = ({
 
             <div className="space-y-2">
               {(['L1', 'L2', 'L3'] as const).map((lvl) => {
-                const role = ROLES[lvl];
+                const role = rolesMap[lvl];
                 const isActive = config.delegationActive[lvl];
                 return (
                   <div
@@ -877,7 +886,7 @@ export const WorkflowRulesModal: React.FC<WorkflowRulesModalProps> = ({
                   >
                     <div className="text-xs">
                       <div className="font-bold text-slate-900">
-                        {role.shortTag}: {role.actorName}
+                        {role.shortTag}: {role.actorName || 'Unassigned'}
                       </div>
                       <div className="text-[11px] text-slate-500">
                         Backup Deputy:{' '}
@@ -1156,7 +1165,7 @@ export const CreateManualPRModal: React.FC<CreateManualPRModalProps> = ({
       prNo: cleanPrNo,
       title: title.trim(),
       department: department.trim(),
-      requestor: requestor.trim() || 'Ahmad (Buyer)',
+      requestor: requestor.trim() || 'Buyer (Level 0)',
       vendorName: vendorName.trim(),
       budgetRefNo: budgetRefNo.trim(),
       glAccountCode: glAccountCode.trim() || '600-4210-ITCAPEX',

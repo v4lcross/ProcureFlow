@@ -319,6 +319,77 @@
         "eventType",
         "createdAt"
       ]
+    },
+    "RoleAssignment": {
+      "title": "RoleAssignment",
+      "description": "Maps a user email address to an approval hierarchy role level (L0, L1, L2, L3).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique assignment ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the creator/owner",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "description": "Assigned user Google/Gmail address",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Assigned user display name",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "roleId": {
+          "type": "string",
+          "description": "Assigned approval level",
+          "enum": ["L0", "L1", "L2", "L3"]
+        },
+        "updatedAtMYT": {
+          "type": "string",
+          "description": "Malaysian timestamp when updated",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "updatedBy": {
+          "type": "string",
+          "description": "Admin email who updated the assignment",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Immutable server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "email",
+        "displayName",
+        "roleId",
+        "updatedAtMYT",
+        "updatedBy",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -333,6 +404,12 @@
         "$ref": "#/entities/AuditLog"
       },
       "description": "Stores chronological immutable audit trail entries for a specific Purchase Requisition."
+    },
+    "/roleAssignments/{assignmentId}": {
+      "schema": {
+        "$ref": "#/entities/RoleAssignment"
+      },
+      "description": "Stores Admin user email-to-level (L0, L1, L2, L3) role assignments."
     }
   }
 }

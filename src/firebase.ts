@@ -23,7 +23,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
-import { AuditLogEntry, PurchaseRequisition } from './types/pr';
+import { AuditLogEntry, PurchaseRequisition, UserRoleAssignment } from './types/pr';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -414,6 +414,51 @@ export async function deleteAllUserPRsInFirestore(user: User) {
       }
       await deleteDoc(doc(db, 'requisitions', prId));
     }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export async function saveRoleAssignmentToFirestore(
+  assignment: UserRoleAssignment,
+  user: User,
+  isUpdate: boolean
+) {
+  const safeId = clampStr(assignment.id.replace(/[^a-zA-Z0-9_-]/g, '-'), 128, `role-${Date.now()}`);
+  const path = `roleAssignments/${safeId}`;
+  try {
+    if (isUpdate) {
+      await updateDoc(doc(db, 'roleAssignments', safeId), {
+        email: clampStr(assignment.email.toLowerCase(), 200),
+        displayName: clampStr(assignment.displayName, 200),
+        roleId: assignment.roleId,
+        updatedAtMYT: clampStr(assignment.updatedAtMYT, 64),
+        updatedBy: clampStr(assignment.updatedBy, 200),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(doc(db, 'roleAssignments', safeId), {
+        id: safeId,
+        ownerId: clampStr(user.uid, 128),
+        email: clampStr(assignment.email.toLowerCase(), 200),
+        displayName: clampStr(assignment.displayName, 200),
+        roleId: assignment.roleId,
+        updatedAtMYT: clampStr(assignment.updatedAtMYT, 64),
+        updatedBy: clampStr(assignment.updatedBy, 200),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, isUpdate ? OperationType.UPDATE : OperationType.CREATE, path);
+  }
+}
+
+export async function deleteRoleAssignmentFromFirestore(assignmentId: string) {
+  const safeId = clampStr(assignmentId.replace(/[^a-zA-Z0-9_-]/g, '-'), 128);
+  const path = `roleAssignments/${safeId}`;
+  try {
+    await deleteDoc(doc(db, 'roleAssignments', safeId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }

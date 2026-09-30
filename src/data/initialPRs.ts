@@ -4,8 +4,8 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   L0: {
     id: 'L0',
     shortTag: 'BUYER',
-    dropdownLabel: 'Buyer: Ahmad (Level 0 - Owner)',
-    actorName: 'Ahmad',
+    dropdownLabel: 'Buyer: (Level 0 - Owner)',
+    actorName: '',
     backupActorName: 'Hafizah (Backup Buyer)',
     roleTitle: 'Buyer (Level 0 - Owner)',
     levelNumber: 0,
@@ -16,9 +16,9 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   L1: {
     id: 'L1',
     shortTag: 'LEVEL 1',
-    dropdownLabel: 'Level 1: Doc Checker (Sarah)',
-    actorName: 'Sarah',
-    backupActorName: 'Amirul (Backup Doc Checker)',
+    dropdownLabel: 'Level 1: Doc Checker',
+    actorName: '',
+    backupActorName: 'Deputy Doc Checker (Level 1)',
     roleTitle: 'Initial Reviewer / Doc Checker (Level 1)',
     levelNumber: 1,
     bannerTitle: 'Initial Reviewer / Doc Checker (Level 1)',
@@ -28,9 +28,9 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   L2: {
     id: 'L2',
     shortTag: 'LEVEL 2',
-    dropdownLabel: 'Level 2: Head Unit (En. Razak)',
-    actorName: 'En. Razak',
-    backupActorName: 'Pn. Farah (Deputy Head Unit)',
+    dropdownLabel: 'Level 2: Head Unit',
+    actorName: '',
+    backupActorName: 'Deputy Head Unit (Level 2)',
     roleTitle: 'Head Unit Reviewer (Level 2)',
     levelNumber: 2,
     bannerTitle: 'Head Unit Reviewer (Level 2)',
@@ -40,9 +40,9 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   L3: {
     id: 'L3',
     shortTag: 'LEVEL 3',
-    dropdownLabel: 'Level 3: GGM, GCAS (Datuk Farid)',
-    actorName: 'Datuk Farid',
-    backupActorName: "Dato' Azman (Acting GGM)",
+    dropdownLabel: 'Level 3: GGM, GCAS',
+    actorName: '',
+    backupActorName: 'Acting GGM, GCAS (Level 3)',
     roleTitle: 'GGM, GCAS (Level 3 - Final Signoff)',
     levelNumber: 3,
     bannerTitle: 'GGM, GCAS (Level 3 - Final Signoff)',
@@ -63,20 +63,31 @@ export const DEFAULT_WORKFLOW_CONFIG: WorkflowConfig = {
 
 export function getEffectiveApproverName(
   roleId: RoleId,
-  config: WorkflowConfig
+  config: WorkflowConfig,
+  customRoles?: Record<RoleId, RoleDefinition>
 ): { name: string; isDelegated: boolean; fullLabel: string } {
-  const role = ROLES[roleId];
+  const role = customRoles ? customRoles[roleId] : ROLES[roleId];
+  const fallbackLabel =
+    roleId === 'L1'
+      ? 'Level 1 (Doc Checker)'
+      : roleId === 'L2'
+      ? 'Level 2 (Head Unit)'
+      : roleId === 'L3'
+      ? 'Level 3 (GGM, GCAS)'
+      : 'Buyer (Level 0)';
+  const primaryName = role.actorName || fallbackLabel;
+
   if (roleId !== 'L0' && config.delegationActive[roleId]) {
     return {
       name: role.backupActorName,
       isDelegated: true,
-      fullLabel: `${role.backupActorName} [Delegated for ${role.actorName}]`,
+      fullLabel: `${role.backupActorName} [Delegated for ${primaryName}]`,
     };
   }
   return {
-    name: role.actorName,
+    name: primaryName,
     isDelegated: false,
-    fullLabel: `${role.actorName} (${role.roleTitle})`,
+    fullLabel: role.actorName ? `${role.actorName} (${role.roleTitle})` : role.roleTitle,
   };
 }
 
@@ -216,7 +227,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
         actorRole: 'System (Automated)',
         actionTitle: 'Assigned to Level 0 Fresh PR Queue',
         remarks:
-          'Initialized at Level 0: Fresh PR under Buyer Ahmad (Owner / Dispatcher) for inspection and routing submission.',
+          'Initialized at Level 0: Fresh PR under Buyer (Owner / Dispatcher) for inspection and routing submission.',
         eventType: 'IMPORT',
       },
     ],
@@ -291,7 +302,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
         actorRole: 'System (Automated)',
         actionTitle: 'Imported Coda Requisition to Level 0 Queue',
         remarks:
-          'Coda Ref CODA-REQ-88412 queued as Level 0: Fresh PR in Buyer Ahmad queue. Ready for Side Viewing inspection.',
+          'Coda Ref CODA-REQ-88412 queued as Level 0: Fresh PR in Buyer queue. Ready for Side Viewing inspection.',
         eventType: 'IMPORT',
       },
     ],
@@ -362,7 +373,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-082-1',
         timestamp: '29/09/2026, 09:15:22 MYT',
-        actorName: 'Ahmad',
+        actorName: 'Buyer',
         actorRole: 'Buyer (Level 0)',
         actionTitle: 'Submitted Pre-Approved PR for Routing',
         remarks: 'Moved status from Level 0 Fresh PR to Pending Level 1 Review.',
@@ -371,7 +382,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-082-2',
         timestamp: '29/09/2026, 10:45:10 MYT',
-        actorName: 'Sarah',
+        actorName: 'Doc Checker (Level 1)',
         actorRole: 'Doc Checker - Level 1',
         actionTitle: 'Approved at Level 1',
         remarks:
@@ -440,7 +451,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-079-1',
         timestamp: '28/09/2026, 11:05:14 MYT',
-        actorName: 'Ahmad',
+        actorName: 'Buyer',
         actorRole: 'Buyer (Level 0)',
         actionTitle: 'Submitted Pre-Approved PR for Routing',
         remarks: 'Moved status from Level 0 Fresh PR to Pending Level 1 Review.',
@@ -449,7 +460,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-079-2',
         timestamp: '28/09/2026, 14:30:40 MYT',
-        actorName: 'Sarah',
+        actorName: 'Doc Checker (Level 1)',
         actorRole: 'Doc Checker - Level 1',
         actionTitle: 'Approved at Level 1',
         remarks: 'Dell corporate quotation & Coda asset forms verified. Advanced to Level 2.',
@@ -458,7 +469,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-079-3',
         timestamp: '29/09/2026, 09:10:00 MYT',
-        actorName: 'En. Razak',
+        actorName: 'Head Unit (Level 2)',
         actorRole: 'Head Unit Reviewer - Level 2',
         actionTitle: 'Approved at Level 2',
         remarks:
@@ -485,7 +496,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       'Quarterly CRAC precision cooling chemical servicing, compressor pressure calibration, and chilled water valve inspection.',
     returnRemarks:
       'Vendor quotation validity date expired yesterday. Please obtain an updated quotation letter before re-routing to Head Unit.',
-    returnedBy: 'Sarah (Doc Checker - Level 1)',
+    returnedBy: 'Doc Checker - Level 1',
     attachments: [
       {
         id: 'att-075-1',
@@ -530,7 +541,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-075-1',
         timestamp: '28/09/2026, 10:12:00 MYT',
-        actorName: 'Ahmad',
+        actorName: 'Buyer',
         actorRole: 'Buyer (Level 0)',
         actionTitle: 'Submitted Pre-Approved PR for Routing',
         remarks: 'Moved status from Level 0 Fresh PR to Pending Level 1 Review.',
@@ -539,7 +550,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-075-2',
         timestamp: '28/09/2026, 16:22:45 MYT',
-        actorName: 'Sarah',
+        actorName: 'Doc Checker (Level 1)',
         actorRole: 'Doc Checker - Level 1',
         actionTitle: 'Returned to Buyer (Level 0)',
         remarks:
@@ -608,7 +619,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-068-1',
         timestamp: '25/09/2026, 09:00:18 MYT',
-        actorName: 'Ahmad',
+        actorName: 'Buyer',
         actorRole: 'Buyer (Level 0)',
         actionTitle: 'Submitted Pre-Approved PR for Routing',
         remarks: 'Moved status from Level 0 Fresh PR to Pending Level 1 Review.',
@@ -617,7 +628,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-068-2',
         timestamp: '25/09/2026, 11:45:02 MYT',
-        actorName: 'Sarah',
+        actorName: 'Doc Checker (Level 1)',
         actorRole: 'Doc Checker - Level 1',
         actionTitle: 'Approved at Level 1',
         remarks: 'Quotation, SST registration, and Coda signoff verified. Advanced to Level 2.',
@@ -626,7 +637,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-068-3',
         timestamp: '26/09/2026, 10:18:55 MYT',
-        actorName: 'En. Razak',
+        actorName: 'Head Unit (Level 2)',
         actorRole: 'Head Unit Reviewer - Level 2',
         actionTitle: 'Approved at Level 2',
         remarks: 'Mandatory LHDN e-Invoice compliance project approved. Advanced to Level 3 (GGM).',
@@ -635,7 +646,7 @@ export const INITIAL_PRS: PurchaseRequisition[] = [
       {
         id: 'aud-068-4',
         timestamp: '26/09/2026, 15:40:12 MYT',
-        actorName: 'Datuk Farid',
+        actorName: 'GGM, GCAS (Level 3)',
         actorRole: 'GGM, GCAS - Level 3',
         actionTitle: 'Final Signoff — Fully Approved',
         remarks:
