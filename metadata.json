@@ -1,0 +1,6 @@
+{
+  "name": "ProcureFlow - PR Approval Router v2.0",
+  "description": "Malaysian workflow Purchase Requisition (PR) Approval Router with Level 0 Fresh PR queue, interactive Side Viewing drawer, 3-tier sequential approvals, stage-aware reminders, and UTC+8 MYT audit trail.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
